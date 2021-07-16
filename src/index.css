@@ -5,6 +5,19 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  
+}
+
+  
+@import 'https://js.arcgis.com/4.19/@arcgis/core/assets/esri/themes/light/main.css';
+html,
+body,
+.App,
+#root {
+  padding: 0;
+  margin: 0;
+  height: 100%;
+  width: 100%;
 }
 
 code {
