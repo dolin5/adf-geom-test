@@ -34,14 +34,42 @@ const ArcGISMap = ()=>{
         center:[-100,39]
       });
 
+      view.popup.defaultPopupTemplateEnabled= true;
+
+      const polygonRenderer = {
+        type:'simple',
+        symbol:{
+        type:'simple-fill',
+        outline: {           color: [0, 196, 0, 1] },
+        color: [0, 196, 0, .25]}
+      } as unknown as SimpleRenderer;
+
+      const pointRenderer = {
+        type:'simple',
+        symbol:{
+          type:'simple-marker',
+          size:8,              
+          outline: { color: [0, 196, 0, 1] },
+          color: [0, 196, 0, .5]
+        } 
+      } as unknown as SimpleRenderer;
+
       const polygonLayer = new FeatureLayer({
         url:"https://gis-test.arborday.org/server/rest/services/CP_Showcase_MVP_Data_Polygon/FeatureServer/0",
+        minScale:99999,
+        renderer:polygonRenderer,
+        outFields:['*']
       });
+
 
       const pointLayer = new FeatureLayer({
         url:"https://gis-test.arborday.org/server/rest/services/CP_Showcase_MVP_Data_Points/FeatureServer/0",
+        objectIdField:'OBJECTID',
+        renderer:pointRenderer, 
+        minScale:99999,
+        outFields:['*'],
+        popupEnabled:true,
       });
-
 
 
       const projectQuery = {where:"1=1", outFields:[platingProjectIDfield,'PlantingProjectName','PlantingProjectType','CalendarYear','AcresRestored'], returnGeometry:false, returnDistinctValues:true} as Query;
@@ -63,49 +91,24 @@ const ArcGISMap = ()=>{
 
           const dissolvedPoints:Graphic[] = Object.entries(mergedArrays).map(dissolvePoints);
 
-          const pointRenderer = {
-            type:'simple',
-            symbol:{
-              type:'simple-marker',
-              size:8,              
-              outline: { color: [0, 196, 0, 1] },
-              color: [0, 196, 0, .5]
-            } 
-          } as unknown as SimpleRenderer;
+          const popupTemplate = pointLayer.createPopupTemplate();
+
+        
+          const fields = pointLayer.fields.filter(fpnt=>polygonLayer.fields.map(fplyg=>fplyg.name).includes(fpnt.name));
+          const forestCodeField = pointLayer.fields.find(f=>f.name=='ForestCode');
+
 
           const zoomedOutLayer = new FeatureLayer({
             source:dissolvedPoints, objectIdField:'OBJECTID',renderer:pointRenderer,
-            maxScale:5000000      
+            maxScale:5000000,
+            fields,
+            popupTemplate
           });
-
 
           const middleLayer = new FeatureLayer({
-            source:mergedPoints, objectIdField:'OBJECTID', renderer:pointRenderer,minScale:4999999,maxScale:100000
-          });
-
-          const polyRenderer = {
-            type:'simple',
-            symbol:{
-            type:'simple-fill',
-            outline: {           color: [0, 196, 0, 1] },
-            color: [0, 196, 0, .25]}
-          } as unknown as SimpleRenderer
-          const polygonLayer = new FeatureLayer({source:polygonFeatures,objectIdField:'OBJECTID',renderer:polyRenderer, minScale:99999});
-          pointFeatures.forEach(pf=>pf.popupTemplate= new PopupTemplate({
-            content:generatePopup
-          }));
-          const pointLayer = new FeatureLayer({
-            url:"https://gis-test.arborday.org/server/rest/services/CP_Showcase_MVP_Data_Points/FeatureServer/0",
-            objectIdField:'OBJECTID',
-            renderer:pointRenderer, 
-            minScale:99999,
-            outFields:['*'],
-            popupEnabled:true,
-            popupTemplate:{content:({graphic}:{graphic:Graphic}) => {
-              
-              return JSON.stringify(graphic)
-            }}
-          });
+            source:mergedPoints, objectIdField:'OBJECTID', renderer:pointRenderer,minScale:4999999,maxScale:100000,fields,popupTemplate
+          });      
+          
           map.addMany([zoomedOutLayer,middleLayer,polygonLayer, pointLayer]);
         } )        
       })
@@ -127,7 +130,9 @@ const createPPIDArray= (features:Graphic[]): {[key: string]: Graphic[]}=>{
 }
 
 const dissolvePoints = ([id,graphics]:[string,Graphic[]],index:number)=>{
-    const point = new Graphic({attributes:{platingProjectIDfield:id,'OBJECTID': index}})
+  const attributes = JSON.parse(JSON.stringify(graphics[0].attributes));
+  attributes['OBJECTID'] = index;
+    const point = new Graphic({attributes})
     point.geometry = averagePointsGeom(graphics);
     return point;
 }
