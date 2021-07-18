@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import MapView from '@arcgis/core/views/MapView'
 import Map from '@arcgis/core/Map';
 import FeatureLayer from '@arcgis/core/layers/FeatureLayer';
@@ -9,12 +9,13 @@ import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol';
 import SimpleRenderer from '@arcgis/core/renderers/SimpleRenderer';
 import Query from '@arcgis/core/tasks/support/Query';
 import PopupTemplate from '@arcgis/core/PopupTemplate';
+import PolygonCentroidLayer from './PolygonCentroidLayer';
 
 const platingProjectIDfield = "PlantingProjectID"
 
-const ArcGISMap = ()=>{
+const dissolveBeyondScale = 4999999;
 
-    
+const ArcGISMap = ({setProjects,sendMapView, setGeoms}:{setProjects:any, sendMapView:(view:MapView)=>void, setGeoms:any})=>{    
   const mapDiv = useRef(null);
 
   useEffect(() => {
@@ -31,8 +32,11 @@ const ArcGISMap = ()=>{
         container: mapDiv.current!,
         map,
         zoom:3,
+        padding:{left:400},
         center:[-100,39]
       });
+
+      sendMapView(view);
 
       view.popup.defaultPopupTemplateEnabled= true;
 
@@ -56,32 +60,34 @@ const ArcGISMap = ()=>{
 
       const polygonLayer = new FeatureLayer({
         url:"https://gis-test.arborday.org/server/rest/services/CP_Showcase_MVP_Data_Polygon/FeatureServer/0",
-        minScale:99999,
+        minScale:dissolveBeyondScale,
         renderer:polygonRenderer,
         outFields:['*']
       });
-
 
       const pointLayer = new FeatureLayer({
         url:"https://gis-test.arborday.org/server/rest/services/CP_Showcase_MVP_Data_Points/FeatureServer/0",
         objectIdField:'OBJECTID',
         renderer:pointRenderer, 
-        minScale:99999,
+        minScale:dissolveBeyondScale,
         outFields:['*'],
         popupEnabled:true,
       });
 
+      view.watch("scale",scale=>{
+        polygonLayer.renderer = scale>=100000?pointRenderer:polygonRenderer
+      })
 
       const projectQuery = {where:"1=1", outFields:[platingProjectIDfield,'PlantingProjectName','PlantingProjectType','CalendarYear','AcresRestored'], returnGeometry:false, returnDistinctValues:true} as Query;
-
       Promise.all([polygonLayer.queryFeatures(projectQuery),pointLayer.queryFeatures(projectQuery)]).then(r=>{      
-        const prjcts = [...r[0].features,r[1].features];
+        setProjects([...r[0].features,...r[1].features]);
         const polyQuery = {where:"PlantingProjectID IN ("+r[0].features.map(f=>f.attributes[platingProjectIDfield]).join(',')+")",outFields:['*'], returnGeometry:true} as Query
         const pointQuery = {where:"PlantingProjectID IN ("+r[1].features.map(f=>f.attributes[platingProjectIDfield]).join(',')+")",outFields:['*'], returnGeometry:true} as Query        
 
         Promise.all([polygonLayer.queryFeatures(polyQuery), pointLayer.queryFeatures(pointQuery)]).then(r=>{
           const polygonFeatures = r[0].features;
           const pointFeatures = r[1].features;
+          setGeoms([...polygonFeatures,...pointFeatures]);
           const polygonCentroidGraphics = polygonFeatures.map(f=>{
             return new Graphic({attributes:f.attributes,geometry:(f.geometry as Polygon).centroid})
           })
@@ -92,11 +98,10 @@ const ArcGISMap = ()=>{
           const dissolvedPoints:Graphic[] = Object.entries(mergedArrays).map(dissolvePoints);
 
           const popupTemplate = pointLayer.createPopupTemplate();
+          popupTemplate.title= '{PlantingProjectName}'
 
         
           const fields = pointLayer.fields.filter(fpnt=>polygonLayer.fields.map(fplyg=>fplyg.name).includes(fpnt.name));
-          const forestCodeField = pointLayer.fields.find(f=>f.name=='ForestCode');
-
 
           const zoomedOutLayer = new FeatureLayer({
             source:dissolvedPoints, objectIdField:'OBJECTID',renderer:pointRenderer,
@@ -105,13 +110,14 @@ const ArcGISMap = ()=>{
             popupTemplate
           });
 
-          const middleLayer = new FeatureLayer({
-            source:mergedPoints, objectIdField:'OBJECTID', renderer:pointRenderer,minScale:4999999,maxScale:100000,fields,popupTemplate
-          });      
           
-          map.addMany([zoomedOutLayer,middleLayer,polygonLayer, pointLayer]);
-        } )        
+          
+          map.addMany([zoomedOutLayer]);
+        } )   
+     
       })
+      map.addMany([polygonLayer,pointLayer]);
+
 
     }
   }, []);
